@@ -9,6 +9,7 @@ use piston::input::*;
 use glutin_window::GlutinWindow as Window;
 use opengl_graphics::{GlGraphics, OpenGL};
 
+#[derive(Copy, Clone)]
 struct Platform {
     x: i32,
     y: i32,
@@ -18,8 +19,17 @@ struct Platform {
 
 struct DragState {
     platform: usize,
+    original_platform: Platform,
     ox: f64,
     oy: f64,
+}
+
+fn apply_drag(drag: &DragState, mouse_x: f64, mouse_y: f64) -> Platform {
+	Platform {
+        x: drag.original_platform.x + (mouse_x - drag.ox) as i32,
+        y: drag.original_platform.y + (mouse_y - drag.oy) as i32,
+        ..drag.original_platform
+    }
 }
 
 pub struct App {
@@ -121,12 +131,11 @@ fn main() {
                     point_in_plat(app.mouse_x, app.mouse_y, p)
                 }) {
                     Some(p) => {
-                        let px = app.platforms[p].x as f64;
-                        let py = app.platforms[p].y as f64;
                         Some(DragState {
                             platform: p,
-                            ox: app.mouse_x - px,
-                            oy: app.mouse_y - py,
+                            original_platform: app.platforms[p],
+                            ox: app.mouse_x,
+                            oy: app.mouse_y,
                         })
                     }
                     None => None,
@@ -142,11 +151,7 @@ fn main() {
             _ => {}
         });
         if let Some(drag) = app.drag.as_ref() {
-            app.platforms[drag.platform] = Platform {
-                x: (app.mouse_x - drag.ox) as i32,
-                y: (app.mouse_y - drag.oy) as i32,
-                ..app.platforms[drag.platform]
-            };
+            app.platforms[drag.platform] = apply_drag(drag, app.mouse_x, app.mouse_y);
         }
     }
 }
