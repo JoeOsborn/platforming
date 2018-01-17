@@ -1,0 +1,16 @@
+[package]
+name = "platforming"
+version = "0.1.0"
+authors = [
+  "Ian Henderson <ian@ianhenderson.org",
+  "Joseph Osborn <jcosborn@ucsc.edu>"
+]
+
+[[bin]]
+name = "platforming"
+
+[dependencies]
+piston = "0.35.0"
+piston2d-graphics = "0.24.0"
+pistoncore-glutin_window = "0.43.0"
+piston2d-opengl_graphics = "0.50.0"
