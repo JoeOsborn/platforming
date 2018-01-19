@@ -17,17 +17,19 @@ struct Platform {
     h: i32,
 }
 
+#[derive(Copy, Clone)]
 struct StartFlag {
     x: i32,
     y: i32,
 }
 
+#[derive(Copy, Clone)]
 struct EndFlag {
     x: i32,
     y: i32,
 }
 
-enum Static {
+enum Forced {
     Plat(Platform),
     Start(StartFlag),
     End(EndFlag),
@@ -114,7 +116,7 @@ pub struct App {
     gl: GlGraphics, // OpenGL drawing backend.
     proposed_drag: Option<DragState>,
     active_drag: Option<DragState>,
-    statics: Vec<Static>,
+    forced: Vec<Forced>,
     platforms: Vec<Platform>,
 }
 
@@ -143,18 +145,18 @@ impl App {
         const BLUE: [f32; 4] = [0.0, 0.0, 1.0, 1.0];
         const YELLOW: [f32; 4] = [1.0, 1.0, 0.0, 1.0];
 
-        let stats = &self.statics;
+        let forced = &self.forced;
         let plats = &self.platforms;
         let drag = self.active_drag.or(self.proposed_drag);
         self.gl.draw(args.viewport(), |c, gl| {
             // Clear the screen.
             clear(BLACK, gl);
-            for s in stats.iter() {
-                match *s {
-                    Static::Plat(plat) => {
+            for f in forced.iter() {
+                match *f {
+                    Forced::Plat(plat) => {
                         draw_platform(c, gl, &plat, RED);
                     }
-                    Static::Start(ref start) => {
+                    Forced::Start(ref start) => {
                         rectangle(
                             BLUE,
                             rectangle::square(f64::from(start.x), f64::from(start.y), 32.0),
@@ -162,7 +164,7 @@ impl App {
                             gl,
                         );
                     }
-                    Static::End(ref end) => {
+                    Forced::End(ref end) => {
                         rectangle(BLUE, rectangle::square(f64::from(end.x), f64::from(end.y), 32.0), c.transform, gl);
                     }
                 }
@@ -252,21 +254,21 @@ fn main() {
         gl: GlGraphics::new(opengl),
         proposed_drag: None,
         active_drag: None,
-        statics: vec![
-            Static::Plat(Platform {
+        forced: vec![
+            Forced::Plat(Platform {
                 x: 0,
                 y: h - (32),
                 w: 64,
                 h: 16,
             }),
-            Static::Start(StartFlag { x: 16, y: h - (32+32) }),
-            Static::Plat(Platform {
+            Forced::Start(StartFlag { x: 16, y: h - (32+32) }),
+            Forced::Plat(Platform {
                 x: 512 - 128,
                 y: h - (256-64),
                 w: 128,
                 h: 16,
             }),
-            Static::End(EndFlag {
+            Forced::End(EndFlag {
                 x: 512 - 64,
                 y: h - (256-32),
             }),
