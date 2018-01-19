@@ -220,12 +220,12 @@ impl App {
                 let src = unpack_loc(e.source, forced, plats);
                 let dst = unpack_loc(e.dest, forced, plats);
                 //draw a line from src's center to dst's center
-                let (x1,y1,w1,h1) = bounds(&src);
-                let (x2,y2,w2,h2) = bounds(&dst);
+                let (x1,y1,w1,_h1) = bounds(&src);
+                let (x2,y2,w2,_h2) = bounds(&dst);
                 let p1x = (x1+w1/4) as f64;
-                let p1y = (y1+h1/2) as f64;
+                let p1y = (y1) as f64;
                 let p2x = (x2+w2/2) as f64;
-                let p2y = (y2+h2/2) as f64;
+                let p2y = (y2) as f64;
                 line(RED, 1.0,
                      [p1x,p1y,p2x,p2y],
                      c.transform,
@@ -442,6 +442,12 @@ fn main() {
                 x: 512 - 64,
                 y: h - (256 - 32),
             }),
+            Element::Plat(Platform {
+                x: 256,
+                y: h - (256+64),
+                w: 16,
+                h: 256+64,
+            }),
         ],
         platforms: vec![
             Platform {
@@ -455,12 +461,6 @@ fn main() {
                 y: h - (128 + 64),
                 w: 64,
                 h: 16,
-            },
-            Platform {
-                x: 256,
-                y: h - (256),
-                w: 16,
-                h: 256,
             },
             Platform {
                 x: (256 + 64),
