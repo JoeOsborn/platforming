@@ -1,7 +1,7 @@
-extern crate piston;
-extern crate graphics;
 extern crate glutin_window;
+extern crate graphics;
 extern crate opengl_graphics;
+extern crate piston;
 
 use piston::window::WindowSettings;
 use piston::event_loop::*;
@@ -46,10 +46,10 @@ impl App {
                 rectangle(
                     RED,
                     rectangle::rectangle_by_corners(
-                        p.x as f64,
-                        p.y as f64,
-                        (p.x + p.w) as f64,
-                        (p.y + p.h) as f64,
+                        f64::from(p.x),
+                        f64::from(p.y),
+                        f64::from(p.x + p.w),
+                        f64::from(p.y + p.h),
                     ),
                     c.transform,
                     gl,
@@ -61,11 +61,11 @@ impl App {
     fn update(&mut self, _args: &UpdateArgs) {}
 }
 
-fn point_in_plat(x: f64, y: f64, p:&Platform) -> bool {
-    let rx = p.x as f64;
-    let ry = p.y as f64;
-    let rw = p.w as f64;
-    let rh = p.h as f64;
+fn point_in_plat(x: f64, y: f64, p: &Platform) -> bool {
+    let rx = f64::from(p.x);
+    let ry = f64::from(p.y);
+    let rw = f64::from(p.w);
+    let rh = f64::from(p.h);
     rx <= x && x <= rx + rw && ry <= y && y <= ry + rh
 }
 
@@ -74,9 +74,9 @@ fn main() {
     let opengl = OpenGL::V3_2;
 
     // Create a Glutin window.
-    let w = 400;
-    let h = 400;
-    let mut window: Window = WindowSettings::new("dragging-square", [w, h])
+    let w:i32 = 400;
+    let h:i32 = 400;
+    let mut window: Window = WindowSettings::new("dragging-square", [w as u32, h as u32])
         .opengl(opengl)
         .exit_on_esc(true)
         .build()
@@ -91,8 +91,8 @@ fn main() {
         drag: None,
         platforms: vec![
             Platform {
-                x: (w / 2 - 25) as i32,
-                y: (h / 2 - 25) as i32,
+                x: (w / 2 - 25),
+                y: (h / 2 - 25),
                 w: 50,
                 h: 50,
             },
@@ -117,12 +117,14 @@ fn main() {
         e.press(|button| match button {
             Button::Mouse(MouseButton::Left) => {
                 app.mouse_down = true;
-                app.drag = match app.platforms.iter().rev().position(|p| {
-                    point_in_plat(app.mouse_x, app.mouse_y, p)
-                }) {
+                app.drag = match app.platforms
+                    .iter()
+                    .rev()
+                    .position(|p| point_in_plat(app.mouse_x, app.mouse_y, p))
+                {
                     Some(p) => {
-                        let px = app.platforms[p].x as f64;
-                        let py = app.platforms[p].y as f64;
+                        let px = f64::from(app.platforms[p].x);
+                        let py = f64::from(app.platforms[p].y);
                         Some(DragState {
                             platform: p,
                             ox: app.mouse_x - px,
