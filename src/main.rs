@@ -216,9 +216,22 @@ impl App {
                     }
                 }
             }
-            // for Edge(source, dest) in &neighbor_graph {
-
-            // }
+            for e in neighbor_graph {
+                let src = unpack_loc(e.source, forced, plats);
+                let dst = unpack_loc(e.dest, forced, plats);
+                //draw a line from src's center to dst's center
+                let (x1,y1,w1,h1) = bounds(&src);
+                let (x2,y2,w2,h2) = bounds(&dst);
+                let p1x = (x1+w1/4) as f64;
+                let p1y = (y1+h1/2) as f64;
+                let p2x = (x2+w2/2) as f64;
+                let p2y = (y2+h2/2) as f64;
+                line(RED, 1.0,
+                     [p1x,p1y,p2x,p2y],
+                     c.transform,
+                     gl
+                );
+            }
         });
     }
 
@@ -262,9 +275,77 @@ fn prepare_drag(app: &App, mouse_x: f64, mouse_y: f64) -> Option<DragState> {
     }
 }
 
-fn find_direct_edges(e1: &Element, e2: &Element) -> Vec<Constraints> {
-    vec![]
+fn bounds(e:&Element) -> (i32,i32,i32,i32) {
+    match *e {
+        Element::Plat(p) => (p.x, p.y, p.w, p.h),
+        Element::Start(s) => (s.x, s.y, 32, 32),
+        Element::End(e) => (e.x, e.y, 32, 32)
+    }
 }
+
+fn find_direct_edges(e1: &Element, e2: &Element) -> Vec<Constraints> {
+    // Only consider platforms for now
+    match *e1 {
+        Element::Plat(_) => {},
+        _ => return vec![]
+    }
+    match *e2 {
+        Element::Plat(_) => {},
+        _ => return vec![]
+    }
+    // For now there's no dynamic level stuff so just use the trivial assumption.
+    // is there a solution to x=x0+vx*t, y=y0+G*t^2+vy0*t of bounded x0,vx,vy0 that does not interpenetrate either platform in between touching the top edge of each one?
+    // We want to solve simultaneously for x0, vx, vy0, t.
+    // We're assuming fixed gravity.
+    // Note that we also implicitly assume that no other platforms block this movement.
+    // This function returns an overapproximation ("what jumps are possible?") which we can refine later.
+    // Let's solve for the pieces separately.  If we solve for vy0 and t, then we can find out whether we have enough time to move out and back in on the x dimension.
+    // WLOG, since we're not considering other elements we can treat vy0 as the maximum vy0, giving y1 = y0 + G*t^2+C*t thus 0 = G*t^2+C*t+(y0-y1) which we solve by the quadratic formula to obtain t.
+    let (x1,y1,w1,_h1) = bounds(e1);
+    let (x2,y2,w2,_h2) = bounds(e2);
+    const G:f64 = -400.0;
+    const VY:f64=400.0;
+    const VX:f64=200.0;
+    const eps:f64=0.0001;
+    let C:f64 = f64::from(y2-y1);
+    let disc = VY*VY-4.0*G*C;
+    if disc < 0.0 {
+        return vec![]
+    }
+    let ta = (-VY - disc.sqrt()) / (2.0*G);
+    let tb = (-VY + disc.sqrt()) / (2.0*G);
+    let t = ta.max(tb);
+    let _tmin = ta.min(tb);
+    if disc <= eps && t < 0.0 {
+        return vec![]
+    }
+    // for now go with min distance between p1 and p2 in x and compare that vs distance reachable in t; later enforce that we don't interpenetrate p1 or p2 in the process
+    let max_of_mins = x1.max(x2);
+    let min_of_maxes = (x1+w1).min(x2+w2);
+    let overlap_in_x = max_of_mins <= min_of_maxes;
+    // dx is the least distance between the two platforms in x
+    let dx = if overlap_in_x { 0 } else { max_of_mins - min_of_maxes };
+    // for now let's just ensure dx <= VX * t
+    // TODO: consider acceleration!
+    // TODO: avoid interpenetration!
+    // we need to pick an x0 and x1 such that we can avoid interpenetration while still having enough time to cover the distance from x0 to x1.
+    // Since we ignore other objects we can say that there is at most one direction change.
+    // If e1 and e2 don't overlap in x we are home free; we always want to jump from an edge to an edge.
+    // There are two cases we care to distinguish when e1 and e2 overlap: e1 is above e2 and e1 is below e2.  If e1 is above e2 we need enough time to move from (left edge or right edge of) e1 to the closest part of e2 to that edge (max of e1.x and e2.x, min of e1.x+e1.w and e2.x+e2.w).  whichever of those is closer to the corresponding edge is the one we use.
+    // If e1 is below e2 we need time to get to the right or left edge of e2 from the closest spot on e1.  flip e1 and e2 in the calculation above. 
+    if f64::from(dx) <= VX * t {
+        vec![Constraints()]
+    } else {
+        vec![]
+    }
+}
+
+fn unpack_loc(loc:ObjectLoc, forced:&[Element], plats:&[Platform]) -> Element {
+    match loc {
+        ObjectLoc::Forced(i) => forced[i].clone(),
+        ObjectLoc::Platform(i) => Element::Plat(plats[i]),
+    }
+} 
 
 fn recalculate_neighbors(
     old_graph: Vec<Edge>,
@@ -278,15 +359,12 @@ fn recalculate_neighbors(
             return changed
                 .iter()
                 .position(|ch| (*ch == e.source) || (*ch == e.dest))
-                .is_some();
+                .is_none();
         })
         .collect();
     for loc in changed {
         // find all sources to plat
-        let elt:Element = match loc {
-            ObjectLoc::Forced(i) => forced[i].clone(),
-            ObjectLoc::Platform(i) => Element::Plat(plats[i]),
-        };
+        let elt:Element = unpack_loc(loc, forced, plats);
         for (fi, f) in forced.iter().enumerate() {
             // TODO: the signature of find_direct_edges might depend on assumptions on the path so far or on other plats or forced elements.
             for assumption_set in find_direct_edges(f, &elt) {
