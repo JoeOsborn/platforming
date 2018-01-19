@@ -1,0 +1,269 @@
+<!doctype html>
+<html>
+    <head>
+        <title>plat proto</title>
+    </head>
+    <body style="background-color: black;">
+        <canvas id="canvas" width=800 height=600></canvas>
+        <script>
+var canvas = document.getElementById("canvas");
+var ctx = canvas.getContext("2d");
+function platformOfHeight(height)
+{
+    return {
+        paint: function (rect) {
+            ctx.fillStyle = "#19f";
+            ctx.fillRect(rect.x, rect.y + rect.h - height, rect.w, height);
+        },
+        drawable: true,
+    };
+}
+var bouncy = {
+    maxbounceframes: 20,
+    paint: function (rect, state) {
+        var minheight = 20;
+        var maxheight = 50;
+        var height = minheight + (maxheight - minheight) * state.bounceframes / this.maxbounceframes;
+        ctx.fillStyle = "#f19";
+        ctx.fillRect(rect.x, rect.y + rect.h - height, rect.w, height);
+    },
+    newstate: function () {
+        return { bounceframes: 0 };
+    },
+    tick: function (state) {
+        if (state.bounceframes > 0)
+            --state.bounceframes;
+        else if (true /* player in contact with platform */)
+            state.bounceframes = this.maxbounceframes;
+    },
+    drawable: true,
+};
+var finishLine = {
+    paint: function (rect) {
+        ctx.fillStyle = "#eff";
+        for (var y = rect.h - 20; y < rect.h; y += 10) {
+            for (var x = 0; x < rect.w; x += 10) {
+                if ((x + y) % 20 == 0)
+                    ctx.fillRect(rect.x + x, rect.y + y, 10, 10);
+            }
+        }
+        ctx.fillStyle = "#306";
+        for (var y = rect.h - 20; y < rect.h; y += 10) {
+            for (var x = 0; x < rect.w; x += 10) {
+                if ((x + y) % 20 == 10)
+                    ctx.fillRect(rect.x + x, rect.y + y, 10, 10);
+            }
+        }
+    },
+    drawable: false,
+};
+function start(playerStyle)
+{
+    return {
+        cr: 8,
+        paint: function (rect, state) {
+            ctx.fillStyle = "#1f9";
+            ctx.fillRect(rect.x, rect.y + rect.h - 20, rect.w, 20);
+            ctx.fillStyle = playerStyle;
+            ctx.beginPath();
+            var cx = state.cx + rect.x + rect.w / 2;
+            var cy = state.cy + rect.y + rect.h - 30 - this.cr;
+            ctx.ellipse(cx, cy, this.cr, this.cr, 0, 0, 2 * Math.PI);
+            ctx.fill();
+        },
+        tick: function (state) {
+            state.cx += 1;
+        },
+        newstate: function () {
+            return { cx: 0, cy: 0 };
+        },
+        drawable: false,
+    };
+}
+// todo: key, locked door over lava, just plain lava
+// also: "turtle shell"?
+var elements = [platformOfHeight(20), platformOfHeight(60), bouncy, finishLine, start("#f01"), start("#13b")];
+var elemWidth = 50;
+var elemHeight = 100;
+var topPath = {
+    e: [4,0,0,0,0,0,0,0,0,0,0,0,3],
+    state: [],
+};
+var bottomPath = {
+    e: [5,0,0,0,0,0,0,0,0,0,0,0,3],
+    state: [],
+};
+var topChar = {x:0,y:0};
+var bottomChar = {x:0,y:0};
+var selection = {
+    path: [],
+    index: 0,
+};
+var paletteSelection = -1;
+var paletteHover = -1;
+var playing = false;
+var playPauseRect = { x: 600, y: 450, w: 100, h: 100 };
+function newstate(index)
+{
+    if (elements[index].newstate)
+        return elements[index].newstate();
+    else
+        return {};
+}
+function initPathState(path)
+{
+    path.state = [];
+    for (var i = 0; i < path.e.length; ++i)
+        path.state.push(newstate(path.e[i]));
+}
+initPathState(topPath);
+initPathState(bottomPath);
+function rectForPaletteElement(index)
+{
+    return {
+        x: 30 + (elemWidth + 20) * index,
+        y: 450,
+        w: elemWidth,
+        h: elemHeight,
+    };
+}
+function rectForPathElement(path, index)
+{
+    var y;
+    if (path == topPath) {
+        y = 30;
+    } else {
+        y = 230;
+    }
+    return {
+        x: 30 + elemWidth * index,
+        y: y,
+        w: elemWidth,
+        h: elemHeight,
+    };
+}
+function pointInRect(x, y, rect)
+{
+    return (x >= rect.x && x < rect.x + rect.w && y >= rect.y && y < rect.y + rect.h);
+}
+function paintPalette()
+{
+    for (var i = 0; i < elements.length; ++i) {
+        if (!elements[i].drawable)
+            continue;
+        var rect = rectForPaletteElement(i);
+        elements[i].paint(rect, newstate(i));
+        if (paletteSelection == i) {
+            ctx.lineWidth = 4;
+            ctx.strokeStyle = "yellow";
+            ctx.strokeRect(rect.x, rect.y, rect.w, rect.h);
+        }
+        if (paletteHover == i) {
+            ctx.lineWidth = 2;
+            ctx.strokeStyle = "#0f0";
+            ctx.strokeRect(rect.x, rect.y, rect.w, rect.h);
+        }
+    }
+}
+function selectPalette(x, y, hover)
+{
+    for (var i = 0; i < elements.length; ++i) {
+        if (!elements[i].drawable)
+            continue;
+        var rect = rectForPaletteElement(i);
+        if (pointInRect(x, y, rect)) {
+            if (hover)
+                paletteHover = i;
+            else
+                paletteSelection = i;
+        }
+    }
+}
+function paintPath(path)
+{
+    for (var i = 0; i < path.e.length; ++i) {
+        var rect = rectForPathElement(path, i);
+        elements[path.e[i]].paint(rect, path.state[i]);
+        if (selection.path == path && selection.index == i) {
+            if (elements[path.e[i]].drawable)
+                ctx.fillStyle = "yellow";
+            else
+                ctx.fillStyle = "red";
+            ctx.globalAlpha = 0.6;
+            ctx.fillRect(rect.x, rect.y, rect.w, rect.h);
+            ctx.globalAlpha = 1;
+        }
+    }
+}
+function selectPath(x, y, path)
+{
+    for (var i = 0; i < path.e.length; ++i) {
+        var rect = rectForPathElement(path, i);
+        if (pointInRect(x, y, rect))
+            selection = { path: path, index: i };
+    }
+}
+function tickPath(path)
+{
+    for (var i = 0; i < path.e.length; ++i) {
+        if (elements[path.e[i]].tick)
+            elements[path.e[i]].tick(path.state[i]);
+    }
+}
+function repaint()
+{
+    ctx.fillStyle = "#103";
+    ctx.fillRect(0, 0, 800, 600);
+    if (playing) {
+        tickPath(topPath);
+        tickPath(bottomPath);
+        ctx.fillStyle = "#f13";
+        ctx.fillRect(playPauseRect.x, playPauseRect.y, playPauseRect.w, playPauseRect.h);
+    } else {
+        ctx.fillStyle = "#1f3";
+        ctx.fillRect(playPauseRect.x, playPauseRect.y, playPauseRect.w, playPauseRect.h);
+    }
+    paintPath(topPath);
+    paintPath(bottomPath);
+    paintPalette();
+    window.requestAnimationFrame(repaint);
+}
+repaint();
+var mousedown = false;
+function drawBrush()
+{
+    if (paletteSelection >= 0 && selection.index >= 0 &&
+     elements[selection.path.e[selection.index]].drawable) {
+        selection.path.e[selection.index] = paletteSelection;
+        selection.path.state[selection.index] = newstate(paletteSelection);
+    }
+}
+window.onmousedown = function (e) {
+    var x = e.clientX + window.scrollX - canvas.offsetLeft;
+    var y = e.clientY + window.scrollY - canvas.offsetTop;
+    mousedown = true;
+    selectPalette(x, y, false);
+    drawBrush();
+    if (pointInRect(x, y, playPauseRect)) {
+        playing = !playing;
+        initPathState(topPath);
+        initPathState(bottomPath);
+    }
+};
+window.onmouseup = function (e) {
+    mousedown = false;
+};
+window.onmousemove = function (e) {
+    var x = e.clientX + window.scrollX - canvas.offsetLeft;
+    var y = e.clientY + window.scrollY - canvas.offsetTop;
+    selection.index = -1;
+    selectPath(x, y, topPath);
+    selectPath(x, y, bottomPath);
+    paletteHover = -1;
+    selectPalette(x, y, true);
+    if (mousedown)
+        drawBrush();
+};
+        </script>
+    </body>
+</html>
