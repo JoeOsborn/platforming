@@ -29,7 +29,8 @@ struct EndFlag {
     y: i32,
 }
 
-enum Forced {
+#[derive(Copy, Clone)]
+enum Element {
     Plat(Platform),
     Start(StartFlag),
     End(EndFlag),
@@ -112,12 +113,28 @@ fn apply_drag(drag: &DragState, mouse_x: f64, mouse_y: f64) -> Platform {
     p
 }
 
+#[derive(Copy, Clone, Eq, PartialEq)]
+enum ObjectLoc {
+    Forced(usize),
+    Platform(usize),
+}
+
+// TODO
+struct Constraints();
+
+struct Edge {
+    source: ObjectLoc,
+    dest: ObjectLoc,
+    assuming: Constraints,
+}
+
 pub struct App {
     gl: GlGraphics, // OpenGL drawing backend.
     proposed_drag: Option<DragState>,
     active_drag: Option<DragState>,
-    forced: Vec<Forced>,
+    forced: Vec<Element>,
     platforms: Vec<Platform>,
+    neighbor_graph: Vec<Edge>,
 }
 
 fn draw_platform(c: graphics::Context, gl: &mut GlGraphics, p: &Platform, col: [f32; 4]) {
@@ -131,7 +148,7 @@ fn draw_platform(c: graphics::Context, gl: &mut GlGraphics, p: &Platform, col: [
             f64::from(p.y + p.h),
         ),
         c.transform,
-        gl
+        gl,
     );
 }
 
@@ -148,15 +165,17 @@ impl App {
         let forced = &self.forced;
         let plats = &self.platforms;
         let drag = self.active_drag.or(self.proposed_drag);
+        let neighbor_graph = &self.neighbor_graph;
+
         self.gl.draw(args.viewport(), |c, gl| {
             // Clear the screen.
             clear(BLACK, gl);
-            for f in forced.iter() {
+            for f in forced {
                 match *f {
-                    Forced::Plat(plat) => {
+                    Element::Plat(plat) => {
                         draw_platform(c, gl, &plat, RED);
                     }
-                    Forced::Start(ref start) => {
+                    Element::Start(ref start) => {
                         rectangle(
                             BLUE,
                             rectangle::square(f64::from(start.x), f64::from(start.y), 32.0),
@@ -164,8 +183,13 @@ impl App {
                             gl,
                         );
                     }
-                    Forced::End(ref end) => {
-                        rectangle(BLUE, rectangle::square(f64::from(end.x), f64::from(end.y), 32.0), c.transform, gl);
+                    Element::End(ref end) => {
+                        rectangle(
+                            BLUE,
+                            rectangle::square(f64::from(end.x), f64::from(end.y), 32.0),
+                            c.transform,
+                            gl,
+                        );
                     }
                 }
             }
@@ -192,6 +216,9 @@ impl App {
                     }
                 }
             }
+            // for Edge(source, dest) in &neighbor_graph {
+
+            // }
         });
     }
 
@@ -213,14 +240,13 @@ fn point_in_handle(x: f64, y: f64, p: &Platform, corner: &Corner) -> bool {
 }
 
 fn prepare_drag(app: &App, mouse_x: f64, mouse_y: f64) -> Option<DragState> {
-    match app.platforms.iter().rev().position(|p| {
+    match app.platforms.iter().rposition(|p| {
         point_in_plat(mouse_x, mouse_y, p)
             || CORNERS
                 .iter()
                 .any(|corner| point_in_handle(mouse_x, mouse_y, p, corner))
     }) {
-        Some(rev_p) => {
-            let p = (app.platforms.len() - 1) - rev_p;
+        Some(p) => {
             let corner = CORNERS
                 .iter()
                 .find(|corner| point_in_handle(mouse_x, mouse_y, &app.platforms[p], corner));
@@ -234,6 +260,69 @@ fn prepare_drag(app: &App, mouse_x: f64, mouse_y: f64) -> Option<DragState> {
         }
         None => None,
     }
+}
+
+fn find_direct_edges(e1: &Element, e2: &Element) -> Vec<Constraints> {
+    vec![]
+}
+
+fn recalculate_neighbors(
+    old_graph: Vec<Edge>,
+    forced: &[Element],
+    plats: &[Platform],
+    changed: Vec<ObjectLoc>,
+) -> Vec<Edge> {
+    let mut new_edges: Vec<Edge> = old_graph
+        .into_iter()
+        .filter(|e| {
+            return changed
+                .iter()
+                .position(|ch| (*ch == e.source) || (*ch == e.dest))
+                .is_some();
+        })
+        .collect();
+    for loc in changed {
+        // find all sources to plat
+        let elt:Element = match loc {
+            ObjectLoc::Forced(i) => forced[i].clone(),
+            ObjectLoc::Platform(i) => Element::Plat(plats[i]),
+        };
+        for (fi, f) in forced.iter().enumerate() {
+            // TODO: the signature of find_direct_edges might depend on assumptions on the path so far or on other plats or forced elements.
+            for assumption_set in find_direct_edges(f, &elt) {
+                new_edges.push(Edge {
+                    source: ObjectLoc::Forced(fi),
+                    dest: loc,
+                    assuming: assumption_set,
+                });
+            }
+            for assumption_set in find_direct_edges(&elt, f) {
+                new_edges.push(Edge {
+                    source: loc,
+                    dest: ObjectLoc::Forced(fi),
+                    assuming: assumption_set,
+                });
+            }
+        }
+        for (pi, p) in plats.iter().enumerate() {
+            // TODO: the signature of find_direct_edges might depend on assumptions on the path so far or on other plats or forced elements.
+            for assumption_set in find_direct_edges(&Element::Plat(*p), &elt) {
+                new_edges.push(Edge {
+                    source: ObjectLoc::Platform(pi),
+                    dest: loc,
+                    assuming: assumption_set,
+                });
+            }
+            for assumption_set in find_direct_edges(&elt, &Element::Plat(*p)) {
+                new_edges.push(Edge {
+                    source: loc,
+                    dest: ObjectLoc::Platform(pi),
+                    assuming: assumption_set,
+                });
+            }
+        }
+    }
+    new_edges
 }
 
 fn main() {
@@ -255,22 +344,25 @@ fn main() {
         proposed_drag: None,
         active_drag: None,
         forced: vec![
-            Forced::Plat(Platform {
+            Element::Plat(Platform {
                 x: 0,
                 y: h - (32),
                 w: 64,
                 h: 16,
             }),
-            Forced::Start(StartFlag { x: 16, y: h - (32+32) }),
-            Forced::Plat(Platform {
+            Element::Start(StartFlag {
+                x: 16,
+                y: h - (32 + 32),
+            }),
+            Element::Plat(Platform {
                 x: 512 - 128,
-                y: h - (256-64),
+                y: h - (256 - 64),
                 w: 128,
                 h: 16,
             }),
-            Forced::End(EndFlag {
+            Element::End(EndFlag {
                 x: 512 - 64,
-                y: h - (256-32),
+                y: h - (256 - 32),
             }),
         ],
         platforms: vec![
@@ -299,7 +391,17 @@ fn main() {
                 h: 16,
             },
         ],
+        neighbor_graph: vec![],
     };
+    app.neighbor_graph = recalculate_neighbors(
+        app.neighbor_graph,
+        &app.forced,
+        &app.platforms,
+        (0..app.platforms.len())
+            .map(|pi| ObjectLoc::Platform(pi))
+            .chain((0..app.forced.len()).map(|fi| ObjectLoc::Forced(fi)))
+            .collect(),
+    );
 
     let mut events = Events::new(EventSettings::new());
     let mut mouse_x = 0.0;
@@ -324,17 +426,27 @@ fn main() {
                 app.proposed_drag = prepare_drag(&app, mouse_x, mouse_y);
             }
         });
-        e.press(|button| if let Button::Mouse(MouseButton::Left) = button {
-            mouse_down = true;
-            app.active_drag = prepare_drag(&app, mouse_x, mouse_y);
+        e.press(|button| {
+            if let Button::Mouse(MouseButton::Left) = button {
+                mouse_down = true;
+                app.active_drag = prepare_drag(&app, mouse_x, mouse_y);
+            }
         });
-        e.release(|button| if let Button::Mouse(MouseButton::Left) = button {
-            mouse_down = false;
-            app.active_drag = None;
-            app.proposed_drag = prepare_drag(&app, mouse_x, mouse_y);
+        e.release(|button| {
+            if let Button::Mouse(MouseButton::Left) = button {
+                mouse_down = false;
+                app.active_drag = None;
+                app.proposed_drag = prepare_drag(&app, mouse_x, mouse_y);
+            }
         });
         if let Some(drag) = app.active_drag.as_ref() {
             app.platforms[drag.platform] = apply_drag(drag, mouse_x, mouse_y);
+            app.neighbor_graph = recalculate_neighbors(
+                app.neighbor_graph,
+                &app.forced,
+                &app.platforms,
+                vec![ObjectLoc::Platform(drag.platform)],
+            );
         }
     }
 }
