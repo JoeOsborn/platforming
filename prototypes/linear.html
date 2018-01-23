@@ -8,6 +8,28 @@
         <script>
 var canvas = document.getElementById("canvas");
 var ctx = canvas.getContext("2d");
+function platformCollide(rect, actor, x, y, height)
+{
+    var r = actor.r;
+    if (x + r <= rect.x || x - r >= rect.x + rect.w)
+        return [];
+    var ylimit = rect.y + rect.h - height - r;
+    if (y <= ylimit)
+        return [];
+    return [
+        function (x, y, r) {
+            if (y <= ylimit)
+                return [{x: x, y: y}];
+            else {
+                return [
+                    {x: x, y: ylimit},
+                    {x: rect.x - r, y: y},
+                    {x: rect.x + rect.w + r, y: y},
+                ];
+            }
+        }
+    ];
+}
 function platformOfHeight(height)
 {
     return {
@@ -15,28 +37,90 @@ function platformOfHeight(height)
             ctx.fillStyle = "#19f";
             ctx.fillRect(rect.x, rect.y + rect.h - height, rect.w, height);
         },
+        collide: function (rect, state, actor, x, y) {
+            return platformCollide(rect, actor, x, y, height);
+        },
         drawable: true,
     };
 }
 var bouncy = {
     maxbounceframes: 20,
+    height: function (state) {
+        var minheight = 19;
+        var maxheight = 22;
+        return minheight + (maxheight - minheight) * state.bounceframes / this.maxbounceframes;
+    },
     paint: function (rect, state) {
-        var minheight = 20;
-        var maxheight = 50;
-        var height = minheight + (maxheight - minheight) * state.bounceframes / this.maxbounceframes;
+        var height = this.height(state);
         ctx.fillStyle = "#f19";
         ctx.fillRect(rect.x, rect.y + rect.h - height, rect.w, height);
+    },
+    collide: function (rect, state, actor, x, y) {
+        var height = this.height(state);
+        return platformCollide(rect, actor, x, y, height);
     },
     newstate: function () {
         return { bounceframes: 0 };
     },
-    tick: function (state) {
+    tick: function (path, state) {
         if (state.bounceframes > 0)
             --state.bounceframes;
-        else if (true /* player in contact with platform */)
+        else if (state.contact)
             state.bounceframes = this.maxbounceframes;
     },
     drawable: true,
+};
+var lava = {
+    paint: function (rect, state) {
+        var height = 15;
+        ctx.fillStyle = "#f30";
+        ctx.fillRect(rect.x, rect.y + rect.h - height, rect.w, height);
+        for (var i = 0; i < state.particles.length; ++i) {
+            var r = state.particles[i].r;
+            if (r <= 3)
+                ctx.globalAlpha = r / 3;
+            else
+                ctx.globalAlpha = 1;
+            ctx.fillRect(state.particles[i].x - r, state.particles[i].y - r, 2*r, 2*r);
+        }
+        ctx.globalAlpha = 1;
+    },
+    collide: function (rect, state, actor, x, y) {
+        return platformCollide(rect, actor, x, y, 15);
+    },
+    newstate: function () {
+        return { particles: [] };
+    },
+    tick: function (path, state, rect) {
+        // particles
+        var nextparticles = [];
+        for (var i = 0; i < state.particles.length; ++i) {
+            state.particles[i].r *= Math.pow(0.95, Math.random() + 1);
+            state.particles[i].y -= 1;
+            state.particles[i].x += Math.random() - 0.5;
+            if (state.particles[i].r > 0.5)
+                nextparticles.push(state.particles[i]);
+        }
+        if (Math.random() > 0.5) {
+            nextparticles.push({
+                x: rect.x + Math.random() * (rect.w - 4) + 2,
+                y: rect.y + rect.h - 15,
+                r: 1 + 2 * Math.random(),
+            });
+        }
+        state.particles = nextparticles;
+        if (state.contact && path.actors.length) {
+            state.contact = false;
+            // TODO: Do this in a better way
+            nextparticles.push({
+                x: path.actors[0].x,
+                y: path.actors[0].y,
+                r: path.actors[0].r,
+            });
+            path.actors = [];
+        }
+    },
+    drawable: false,
 };
 var finishLine = {
     paint: function (rect) {
@@ -55,6 +139,22 @@ var finishLine = {
             }
         }
     },
+    tick: function (path, state) {
+        if (state.contact) {
+            // TODO: Do this in a better way
+            if (!state.endx) {
+                state.endx = path.actors[0].x;
+                state.endy = path.actors[0].y;
+            }
+            path.actors[0].x = state.endx;
+            path.actors[0].y = state.endy;
+            path.actors[0].vx = 0;
+            path.actors[0].vy = 0;
+        }
+    },
+    collide: function (rect, state, actor, x, y) {
+        return platformCollide(rect, actor, x, y, 20);
+    },
     drawable: false,
 };
 function start(playerStyle)
@@ -64,15 +164,23 @@ function start(playerStyle)
         paint: function (rect, state) {
             ctx.fillStyle = "#1f9";
             ctx.fillRect(rect.x, rect.y + rect.h - 20, rect.w, 20);
-            ctx.fillStyle = playerStyle;
-            ctx.beginPath();
-            var cx = state.cx + rect.x + rect.w / 2;
-            var cy = state.cy + rect.y + rect.h - 30 - this.cr;
-            ctx.ellipse(cx, cy, this.cr, this.cr, 0, 0, 2 * Math.PI);
-            ctx.fill();
         },
-        tick: function (state) {
+        collide: function (rect, state, actor, x, y) {
+            return platformCollide(rect, actor, x, y, 20);
+        },
+        tick: function (path, state) {
             state.cx += 1;
+        },
+        createActors: function (rect, path) {
+            return [{
+                x: rect.x + rect.w / 2,
+                y: rect.y + rect.h - 30 - this.cr,
+                r: this.cr,
+                paint: function () {
+                    ctx.fillStyle = playerStyle;
+                    ctx.fillRect(this.x - this.r, this.y - this.r, this.r*2, this.r*2);
+                },
+            }];
         },
         newstate: function () {
             return { cx: 0, cy: 0 };
@@ -82,19 +190,19 @@ function start(playerStyle)
 }
 // todo: key, locked door over lava, just plain lava
 // also: "turtle shell"?
-var elements = [platformOfHeight(20), platformOfHeight(60), bouncy, finishLine, start("#f01"), start("#13b")];
+var elements = [platformOfHeight(20), platformOfHeight(50), bouncy, finishLine, start("#f01"), start("#13b"), lava];
 var elemWidth = 50;
 var elemHeight = 100;
 var topPath = {
     e: [4,0,0,0,0,0,0,0,0,0,0,0,3],
     state: [],
+    actors: [],
 };
 var bottomPath = {
-    e: [5,0,0,0,0,0,0,0,0,0,0,0,3],
+    e: [5,0,0,0,6,0,0,0,6,6,0,0,3],
     state: [],
+    actors: [],
 };
-var topChar = {x:0,y:0};
-var bottomChar = {x:0,y:0};
 var selection = {
     path: [],
     index: 0,
@@ -113,8 +221,15 @@ function newstate(index)
 function initPathState(path)
 {
     path.state = [];
-    for (var i = 0; i < path.e.length; ++i)
+    path.actors = [];
+    for (var i = 0; i < path.e.length; ++i) {
         path.state.push(newstate(path.e[i]));
+        if (elements[path.e[i]].createActors) {
+            var actors = elements[path.e[i]].createActors(rectForPathElement(path, i), i);
+            for (var j = 0; j < actors.length; ++j)
+                path.actors.push(actors[i]);
+        }
+    }
 }
 initPathState(topPath);
 initPathState(bottomPath);
@@ -194,6 +309,8 @@ function paintPath(path)
             ctx.globalAlpha = 1;
         }
     }
+    for (var i = 0; i < path.actors.length; ++i)
+        path.actors[i].paint();
 }
 function selectPath(x, y, path)
 {
@@ -207,7 +324,68 @@ function tickPath(path)
 {
     for (var i = 0; i < path.e.length; ++i) {
         if (elements[path.e[i]].tick)
-            elements[path.e[i]].tick(path.state[i]);
+            elements[path.e[i]].tick(path, path.state[i], rectForPathElement(path, i));
+        path.state[i].contact = false;
+    }
+    var dt = 0.016;
+    for (var i = 0; i < path.actors.length; ++i) {
+        var actor = path.actors[i];
+        var vx = 0;
+        var vy = 0;
+        if (actor.vx) vx = actor.vx;
+        if (actor.vy) vy = actor.vy;
+        // integrate forces
+        vy += dt * 308; // gravity
+        vx += dt * 50; // rolling
+        // apply damping
+        if (actor.contact) {
+            vx *= Math.pow(0.6, dt);
+            vy *= Math.pow(0.6, dt);
+        } else {
+            vx *= Math.pow(0.7, dt);
+            vy *= Math.pow(0.7, dt);
+        }
+        // integrate velocity
+        var x = actor.x + vx * dt;
+        var y = actor.y + vy * dt;
+        // find colliders
+        var colliders = [];
+        for (var j = 0; j < path.e.length; ++j) {
+            if (elements[path.e[j]].collide) {
+                var c = elements[path.e[j]].collide(rectForPathElement(path, j), path.state[j], actor, x, y);
+                if (c.length > 0)
+                    path.state[j].contact = true;
+                colliders = colliders.concat(c);
+            }
+        }
+        var projectionIterations = 1;
+        var contact = false;
+        for (var j = 0; j < projectionIterations; ++j) {
+            for (var k = 0; k < colliders.length; ++k) {
+                contact = true;
+                var result = colliders[k](x, y, actor.r);
+                var closest = -1;
+                var distance2 = 1000000;
+                for (var l = 0; l < result.length; ++l) {
+                    var dx = result[l].x - x;
+                    var dy = result[l].y - y;
+                    var d2 = dx*dx + dy*dy;
+                    if (d2 < distance2) {
+                        distance2 = d2;
+                        closest = l;
+                    }
+                }
+                if (closest >= 0) {
+                    x = result[closest].x;
+                    y = result[closest].y;
+                }
+            }
+        }
+        actor.contact = contact;
+        actor.vx = (x - actor.x) / dt;
+        actor.vy = (y - actor.y) / dt;
+        actor.x = x;
+        actor.y = y;
     }
 }
 function repaint()
