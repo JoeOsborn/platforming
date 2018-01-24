@@ -43,6 +43,26 @@ function platformOfHeight(height)
         drawable: true,
     };
 }
+var elevator = {
+    paint: function (rect, state) {
+        ctx.fillStyle = "#9cf";
+        ctx.fillRect(rect.x, rect.y + rect.h - state.height, rect.w, state.height);
+    },
+    collide: function (rect, state, actor, x, y) {
+        return platformCollide(rect, actor, x, y, state.height);
+    },
+    newstate: function () {
+        return { height: 27, direction: 0.75 };
+    },
+    tick: function (path, state) {
+        state.height += state.direction;
+        if (state.height >= 50)
+            state.direction *= -1;
+        if (state.height <= 15)
+            state.direction *= -1;
+    },
+    drawable: true,
+};
 var bouncy = {
     maxbounceframes: 20,
     height: function (state) {
@@ -117,11 +137,12 @@ var lava = {
                 y: path.actors[0].y,
                 r: path.actors[0].r,
             });
-            path.actors = [];
+            path.actors.splice(0, 1);
         }
     },
     drawable: false,
 };
+var finishes = 0;
 var finishLine = {
     paint: function (rect) {
         ctx.fillStyle = "#eff";
@@ -145,6 +166,7 @@ var finishLine = {
             if (!state.endx) {
                 state.endx = path.actors[0].x;
                 state.endy = path.actors[0].y;
+                finishes++;
             }
             path.actors[0].x = state.endx;
             path.actors[0].y = state.endy;
@@ -180,6 +202,7 @@ function start(playerStyle)
                     ctx.fillStyle = playerStyle;
                     ctx.fillRect(this.x - this.r, this.y - this.r, this.r*2, this.r*2);
                 },
+                dynamic: true,
             }];
         },
         newstate: function () {
@@ -190,16 +213,16 @@ function start(playerStyle)
 }
 // todo: key, locked door over lava, just plain lava
 // also: "turtle shell"?
-var elements = [platformOfHeight(20), platformOfHeight(50), bouncy, finishLine, start("#f01"), start("#13b"), lava];
+var elements = [platformOfHeight(20), platformOfHeight(50), bouncy, elevator, finishLine, start("#f01"), start("#13b"), lava];
 var elemWidth = 50;
 var elemHeight = 100;
 var topPath = {
-    e: [4,0,0,0,0,0,0,0,0,0,0,0,3],
+    e: [5,0,0,7,0,0,0,7,0,0,7,7,4],
     state: [],
     actors: [],
 };
 var bottomPath = {
-    e: [5,0,0,0,6,0,0,0,6,6,0,0,3],
+    e: [6,0,0,0,7,0,0,0,7,7,0,0,4],
     state: [],
     actors: [],
 };
@@ -218,8 +241,11 @@ function newstate(index)
     else
         return {};
 }
+var unlocked = false;
 function initPathState(path)
 {
+    finishes = 0;
+    unlocked = false;
     path.state = [];
     path.actors = [];
     for (var i = 0; i < path.e.length; ++i) {
@@ -229,6 +255,70 @@ function initPathState(path)
             for (var j = 0; j < actors.length; ++j)
                 path.actors.push(actors[i]);
         }
+    }
+    if (path == topPath) {
+        var rect = rectForPathElement(path, 3);
+        path.actors.push({
+            x: rect.x + rect.w / 2,
+            y: rect.y + rect.h / 2,
+            r: 6,
+            paint: function () {
+                if (unlocked) return;
+                ctx.fillStyle = '#ff1';
+                ctx.fillRect(this.x - this.r, this.y - 40, this.r * 2, 60);
+            },
+            collide: function (actor, x, y) {
+                if (unlocked) return [];
+                var r = actor.r;
+                if (x + r <= this.x - this.r || x - r >= this.x + this.r)
+                    return [];
+                var tx = this.x;
+                var tr = this.r;
+                return [
+                    function (x, y, r) {
+                        return [
+                            {x: tx - tr - r, y: y},
+                            {x: tx + tr + r, y: y},
+                        ];
+                    }
+                ];
+            },
+        });
+    } else {
+        var rect = rectForPathElement(path, 4);
+        path.actors.push({
+            x: rect.x + rect.w / 2,
+            y: rect.y + rect.h / 2,
+            r: 8,
+            paint: function () {
+                if (unlocked) return;
+                ctx.fillStyle = '#ff1';
+                ctx.fillRect(this.x - this.r, this.y - this.r, this.r * 2, this.r * 2);
+                ctx.globalCompositeOperation = "destination-out";
+                ctx.fillText("\uD83D\uDD11", this.x - 6, this.y + 4);
+                ctx.globalCompositeOperation = "source-over";
+            },
+            tick: function () {
+                if (this.contact)
+                    unlocked = true;
+            },
+            collide: function (actor, x, y) {
+                if (unlocked) return [];
+                var r = actor.r;
+                if (x + r <= this.x - this.r || x - r >= this.x + this.r)
+                    return [];
+                if (y + r <= this.y - this.r || y - r >= this.y + this.r)
+                    return [];
+                return [
+                    function (x, y, r) {
+                        // Just note the contact without applying a real constraint.
+                        return [
+                            {x: x, y: y},
+                        ];
+                    }
+                ];
+            },
+        });
     }
 }
 initPathState(topPath);
@@ -268,12 +358,12 @@ function paintPalette()
             continue;
         var rect = rectForPaletteElement(i);
         elements[i].paint(rect, newstate(i));
-        if (paletteSelection == i) {
+        if (!playing && paletteSelection == i) {
             ctx.lineWidth = 4;
             ctx.strokeStyle = "yellow";
             ctx.strokeRect(rect.x, rect.y, rect.w, rect.h);
         }
-        if (paletteHover == i) {
+        if (!playing && paletteHover == i) {
             ctx.lineWidth = 2;
             ctx.strokeStyle = "#0f0";
             ctx.strokeRect(rect.x, rect.y, rect.w, rect.h);
@@ -327,9 +417,16 @@ function tickPath(path)
             elements[path.e[i]].tick(path, path.state[i], rectForPathElement(path, i));
         path.state[i].contact = false;
     }
+    for (var i = 0; i < path.actors.length; ++i) {
+        if (path.actors[i].tick)
+            path.actors[i].tick();
+        path.actors[i].contact = false;
+    }
     var dt = 0.016;
     for (var i = 0; i < path.actors.length; ++i) {
         var actor = path.actors[i];
+        if (!actor.dynamic)
+            continue;
         var vx = 0;
         var vy = 0;
         if (actor.vx) vx = actor.vx;
@@ -355,6 +452,14 @@ function tickPath(path)
                 var c = elements[path.e[j]].collide(rectForPathElement(path, j), path.state[j], actor, x, y);
                 if (c.length > 0)
                     path.state[j].contact = true;
+                colliders = colliders.concat(c);
+            }
+        }
+        for (var j = 0; j < path.actors.length; ++j) {
+            if (j != i && path.actors[j].collide) {
+                var c = path.actors[j].collide(actor, x, y);
+                if (c.length > 0)
+                    path.actors[j].contact = true;
                 colliders = colliders.concat(c);
             }
         }
@@ -404,6 +509,11 @@ function repaint()
     paintPath(topPath);
     paintPath(bottomPath);
     paintPalette();
+    if (finishes >= 2) {
+        ctx.fillStyle = "white";
+        ctx.font = "32px sans-serif";
+        ctx.fillText("you're winner!", 40, 40);
+    }
     window.requestAnimationFrame(repaint);
 }
 repaint();
@@ -420,7 +530,8 @@ window.onmousedown = function (e) {
     var x = e.clientX + window.scrollX - canvas.offsetLeft;
     var y = e.clientY + window.scrollY - canvas.offsetTop;
     mousedown = true;
-    selectPalette(x, y, false);
+    if (!playing)
+        selectPalette(x, y, false);
     drawBrush();
     if (pointInRect(x, y, playPauseRect)) {
         playing = !playing;
@@ -435,10 +546,13 @@ window.onmousemove = function (e) {
     var x = e.clientX + window.scrollX - canvas.offsetLeft;
     var y = e.clientY + window.scrollY - canvas.offsetTop;
     selection.index = -1;
-    selectPath(x, y, topPath);
-    selectPath(x, y, bottomPath);
+    if (!playing) {
+        selectPath(x, y, topPath);
+        selectPath(x, y, bottomPath);
+    }
     paletteHover = -1;
-    selectPalette(x, y, true);
+    if (!playing)
+        selectPalette(x, y, true);
     if (mousedown)
         drawBrush();
 };
